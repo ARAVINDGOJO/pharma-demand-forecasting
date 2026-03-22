@@ -5,9 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.forecasting.backtest import BacktestConfig, backtest_all
-from src.forecasting.forecast import forecast_all
-from src.forecasting.preprocess import DatasetSpec, fill_time_gaps, load_demand_csv, load_wide_demand_csv, normalize_spec
+from src.pipeline import ForecastPipelineParams, load_and_prepare_dataframe, run_forecast_pipeline
 
 
 def parse_args() -> argparse.Namespace:
@@ -46,33 +44,25 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    if args.wide:
-        date_col = args.date_col or "datum"
-        df = load_wide_demand_csv(args.data, date_col=date_col, group_col_name="sku_id", target_col="y")
-        # wide input cannot contain additional grouping columns without extra data;
-        # group_cols arg is ignored except for keeping sku_id.
-        spec = DatasetSpec(date_col=date_col, target_col="y", group_cols=("sku_id",))
-    else:
-        date_col = args.date_col or "date"
-        spec_norm = normalize_spec(group_cols=args.group_cols)
-        spec = DatasetSpec(date_col=date_col, target_col="y", group_cols=spec_norm.group_cols)
-        df = load_demand_csv(args.data, spec)
+    params = ForecastPipelineParams(
+        wide=args.wide,
+        date_col=args.date_col,
+        freq=args.freq,
+        horizon=args.horizon,
+        group_cols=tuple(args.group_cols) if args.group_cols else ("sku_id",),
+        n_folds=args.n_folds,
+        min_train_size=args.min_train_size,
+        artifacts_dir=args.artifacts_dir,
+        backtest_progress=True,
+    )
 
-    df = fill_time_gaps(df, freq=args.freq, spec=spec, fill_target=0.0)
+    df, spec = load_and_prepare_dataframe(csv_path=args.data, params=params)
+    out = run_forecast_pipeline(df=df, spec=spec, params=params)
 
-    art = Path(args.artifacts_dir)
-    art.mkdir(parents=True, exist_ok=True)
+    fc = out["forecasts"]
+    metrics_df = out["metrics"]
 
-    cfg = BacktestConfig(freq=args.freq, horizon=args.horizon, n_folds=args.n_folds, min_train_size=args.min_train_size)
-    metrics_df, fold_fc_df = backtest_all(df, spec=spec, cfg=cfg, show_progress=True)
-    if not metrics_df.empty:
-        metrics_df.to_csv(art / "metrics.csv", index=False)
-    if not fold_fc_df.empty:
-        fold_fc_df.to_csv(art / "backtest_forecasts.csv", index=False)
-
-    fc = forecast_all(df, spec=spec, freq=args.freq, horizon=args.horizon)
-    fc.to_csv(art / "forecasts.csv", index=False)
-
+    art = Path(params.artifacts_dir)
     print(f"Wrote: {art / 'forecasts.csv'}")
     if not metrics_df.empty:
         print(f"Wrote: {art / 'metrics.csv'}")
@@ -98,4 +88,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

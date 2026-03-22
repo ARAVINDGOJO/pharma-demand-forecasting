@@ -25,22 +25,37 @@ def _normalize_group_cols(group_cols: Iterable[str] | None) -> tuple[str, ...]:
 
 def load_demand_csv(path: str, spec: DatasetSpec) -> pd.DataFrame:
     df = pd.read_csv(path)
-    if spec.date_col not in df.columns:
-        raise ValueError(f"Missing date column '{spec.date_col}' in {path}")
-    for c in spec.group_cols:
-        if c not in df.columns:
-            raise ValueError(f"Missing group column '{c}' in {path}")
-    if spec.target_col not in df.columns:
-        raise ValueError(f"Missing target column '{spec.target_col}' in {path}")
+    return validate_long_demand_dataframe(df, spec, source=path)
 
-    df = df.copy()
-    df[spec.date_col] = pd.to_datetime(df[spec.date_col], errors="raise")
-    df = df.sort_values(list(spec.group_cols) + [spec.date_col])
-    df[spec.target_col] = pd.to_numeric(df[spec.target_col], errors="coerce").astype(float)
-    if df[spec.target_col].isna().any():
-        bad = int(df[spec.target_col].isna().sum())
-        raise ValueError(f"Found {bad} rows with non-numeric '{spec.target_col}'. Fix or drop them.")
-    return df
+
+def melt_wide_demand_dataframe(
+    df: pd.DataFrame,
+    *,
+    date_col: str = "datum",
+    group_col_name: str = "sku_id",
+    target_col: str = "y",
+    source: str = "input",
+) -> pd.DataFrame:
+    """
+    Converts wide demand (one date column + many SKU columns) to long format.
+    """
+    if date_col not in df.columns:
+        raise ValueError(f"Missing date column '{date_col}' in {source}")
+
+    value_cols = [c for c in df.columns if c != date_col]
+    if not value_cols:
+        raise ValueError(f"No SKU columns found (only '{date_col}' present) in {source}")
+
+    out = df.melt(id_vars=[date_col], value_vars=value_cols, var_name=group_col_name, value_name=target_col)
+    out = out.dropna(subset=[target_col]).copy()
+    out[date_col] = pd.to_datetime(out[date_col], errors="raise")
+    out[target_col] = pd.to_numeric(out[target_col], errors="coerce").astype(float)
+    if out[target_col].isna().any():
+        bad = int(out[target_col].isna().sum())
+        raise ValueError(f"Found {bad} rows with non-numeric '{target_col}'. Fix or drop them.")
+
+    out = out.sort_values([group_col_name, date_col]).reset_index(drop=True)
+    return out
 
 
 def load_wide_demand_csv(
@@ -58,22 +73,26 @@ def load_wide_demand_csv(
     Returns a "long" dataframe with columns: [date, sku_id, y].
     """
     df = pd.read_csv(path)
-    if date_col not in df.columns:
-        raise ValueError(f"Missing date column '{date_col}' in {path}")
+    return melt_wide_demand_dataframe(df, date_col=date_col, group_col_name=group_col_name, target_col=target_col, source=path)
 
-    value_cols = [c for c in df.columns if c != date_col]
-    if not value_cols:
-        raise ValueError(f"No SKU columns found (only '{date_col}' present) in {path}")
 
-    out = df.melt(id_vars=[date_col], value_vars=value_cols, var_name=group_col_name, value_name=target_col)
-    out = out.dropna(subset=[target_col]).copy()
-    out[date_col] = pd.to_datetime(out[date_col], errors="raise")
-    out[target_col] = pd.to_numeric(out[target_col], errors="coerce").astype(float)
-    if out[target_col].isna().any():
-        bad = int(out[target_col].isna().sum())
-        raise ValueError(f"Found {bad} rows with non-numeric '{target_col}'. Fix or drop them.")
+def validate_long_demand_dataframe(df: pd.DataFrame, spec: DatasetSpec, source: str = "input") -> pd.DataFrame:
+    """Validate and normalize long-format demand data."""
+    if spec.date_col not in df.columns:
+        raise ValueError(f"Missing date column '{spec.date_col}' in {source}")
+    for c in spec.group_cols:
+        if c not in df.columns:
+            raise ValueError(f"Missing group column '{c}' in {source}")
+    if spec.target_col not in df.columns:
+        raise ValueError(f"Missing target column '{spec.target_col}' in {source}")
 
-    out = out.sort_values([group_col_name, date_col]).reset_index(drop=True)
+    out = df.copy()
+    out[spec.date_col] = pd.to_datetime(out[spec.date_col], errors="raise")
+    out = out.sort_values(list(spec.group_cols) + [spec.date_col])
+    out[spec.target_col] = pd.to_numeric(out[spec.target_col], errors="coerce").astype(float)
+    if out[spec.target_col].isna().any():
+        bad = int(out[spec.target_col].isna().sum())
+        raise ValueError(f"Found {bad} rows with non-numeric '{spec.target_col}' in {source}.")
     return out
 
 

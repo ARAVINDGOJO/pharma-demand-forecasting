@@ -78,3 +78,35 @@ Outputs:
 python -m src.run_forecast --help
 ```
 
+## 7) Run as a live API (server)
+
+Install deps (includes FastAPI + Uvicorn), then from the project folder:
+
+```bash
+python -m uvicorn src.api:app --host 0.0.0.0 --port 8000
+```
+
+- **Health check**: `GET http://localhost:8000/health`
+- **Forecast** (upload CSV): `POST http://localhost:8000/forecast`
+  - Form field: `file` = your `.csv`
+  - Query params (examples): `wide=true`, `date_col=datum`, `freq=M`, `horizon=6`, `include_rows=200`
+
+Example with **curl** (wide monthly CSV):
+
+```bash
+curl -X POST "http://localhost:8000/forecast?wide=true&date_col=datum&freq=M&horizon=6&include_rows=50" -F "file=@D:/Downloads/salesmonthly.csv"
+```
+
+The API returns JSON (sample rows + `best_models_by_smape`) and also writes CSVs under **`artifacts/`** on the server (or `artifacts_dir` you pass).
+
+## 8) Schedule automatic runs (Windows)
+
+Use **Task Scheduler** to run the CLI on a schedule (daily/weekly/monthly):
+
+1. Action: **Start a program**
+2. Program: `python` (full path to your `python.exe` if needed)
+3. Arguments: `-m src.run_forecast --data "D:\path\to\salesmonthly.csv" --wide --date_col datum --freq M --horizon 6`
+4. Start in: `E:\New folder` (your project folder)
+
+Outputs land in `E:\New folder\artifacts\` each run.
+
