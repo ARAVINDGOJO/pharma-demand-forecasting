@@ -11,11 +11,26 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
 from src.pipeline import ForecastPipelineParams, load_and_prepare_from_bytes, run_forecast_pipeline
 
 app = FastAPI(title="Pharma Demand Forecasting", version="1.0.0")
+
+
+@app.get("/")
+def root() -> dict[str, str | list[str]]:
+    """
+    Home — browsers opening http://127.0.0.1:8000/ get JSON with links instead of 404.
+    """
+    return {
+        "service": "Pharma Demand Forecasting API",
+        "docs": "/docs",
+        "health": "/health",
+        "forecast": "POST /forecast (multipart: file=your.csv)",
+        "note": "Open /docs in your browser to try the API interactively.",
+    }
 
 
 @app.get("/health")
@@ -81,4 +96,5 @@ async def forecast(
         take = min(include_rows, len(fc))
         payload["forecasts_sample"] = fc.head(take).to_dict(orient="records")
 
-    return JSONResponse(content=payload)
+    # pandas/numpy types (float64, Timestamp) are not JSON-serializable by default
+    return JSONResponse(content=jsonable_encoder(payload))
